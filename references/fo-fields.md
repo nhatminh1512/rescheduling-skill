@@ -1,10 +1,6 @@
----
-description: F&O order-line and purchase-order-line fields, reservation values, and transport days. Read during the join and the ETD calculation.
----
-
 # F&O fields and select values
 
-Source extracts in gold packets: `Order lines_20260805.xlsx`, `Purchase order lines_20260805.xlsx`. Use Sheet1 only. Sheet2 is a UNIQUE dump (`#N/A` / `0` = empty).
+Source extracts in gold packets: `Order lines_20260805.xlsx`, `Purchase order lines_20260805.xlsx`. Use **Sheet1** only. Sheet2 is a UNIQUE dump (`#N/A` / `0` = empty).
 
 ## Order lines (SO)
 
@@ -24,7 +20,7 @@ Source extracts in gold packets: `Order lines_20260805.xlsx`, `Purchase order li
 | Confirmed ship date | `N` |
 | Confirmed receipt date | Committed delivery `G` and part of `O` |
 | Mode of delivery | Transport days |
-| Created date and time | Trace only. Not written to a result file |
+| Created date and time | Result column A |
 
 ## Purchase order lines (PO)
 
@@ -90,4 +86,4 @@ Unknown code → 0 days and remarks that the code is unconfirmed. Do not invent 
 
 ## Working-row fields after join
 
-Carry at least: request identity, type, `G`, `H`, `M`, `N`, `O`, reservation, shipped, approval, mode, transport days, match status, remarks flags. These stay in the working set. Only the ETD and remarks are written back to the request sheet.
+Carry at least: request identity, type, `G`, `H`, `M`, `N`, `O`, reservation, shipped, approval, mode, transport days, match status, remarks flags.
