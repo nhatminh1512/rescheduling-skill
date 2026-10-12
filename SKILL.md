@@ -5,7 +5,7 @@ description: Use when processing a customer rescheduling Excel, classifying pull
 
 # Reschedule engine
 
-To-be spec v1.5 (11 September 2026). Gold packets live in `Input/` (inbound + F&O) and `Output/` (filled Reply). Load [templates.md](references/templates.md), [fo-fields.md](references/fo-fields.md), and [examples.md](references/examples.md) instead of guessing columns.
+To-be spec v1.5 (11 September 2026). Gold packets live in `Input/` (inbound + F&O) and `Output/` (filled Reply). Load [templates.md](templates.md), [fo-fields.md](fo-fields.md), and [examples.md](examples.md) instead of guessing columns.
 
 Scope: **only Pull-in rows enter the engine and `Rescheduling.xlsx`**. Push-out is no action (remain date). Cancel is a user note only.
 
