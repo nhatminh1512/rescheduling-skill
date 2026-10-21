@@ -14,11 +14,11 @@ Scope: **only Pull-in rows enter the engine and `Rescheduling.xlsx`**. Push-out 
 
 ## Pipeline
 
-1. Consolidate request → SO and PO lines.
+1. Consolidate request → SO lines (one working row per request line).
 2. Classify Action → type.
 3. Drop Push-out and Cancel from the engine (they still appear on the customer Reply).
-4. For Pull-in only: inventory, supplier ETA, delivery zone.
-5. Calculate recommended delivery date `I`.
+4. For Pull-in only: inventory, then supplier date on Purchase order lines (see **Supplier date**), then delivery zone.
+5. Calculate recommended delivery date `I` and fill Reply / `Rescheduling.xlsx` as before.
 6. Human review when a flag applies.
 7. Write `Rescheduling.xlsx` (Pull-in only) then write back ETA / remarks / tracking on the customer Reply.
 
@@ -32,12 +32,21 @@ Scope: **only Pull-in rows enter the engine and `Rescheduling.xlsx`**. Push-out 
 
 There is no standalone inventory file. Inventory = SO reservation status + open PO remainder.
 
-**Join key (in order)**
+**SO join key (in order)** — attach at most one sales-order line
 
 1. Customer PO# + External PN + quantity + need or due date.
 2. Then Bossard item number.
 
-Keep **one working row per request line**. Do not merge several lines that share the same PN on one PO. Unmatched rows stay in the working set with remarks `Unmatched SO/PO line`.
+Keep **one working row per request line**. Do not merge several lines that share the same PN on one PO. If the customer PO exists in F&O but this PN is not on it, do not steal another PO's SO line. Unmatched rows stay in the working set with remarks `Unmatched SO/PO line`.
+
+**Bossard item for supply** (does not attach an SO line)
+
+1. Matched SO `Item number`, if present.
+2. Else request customer PN (`External` / aliases) on Order lines → unique `Item number`. If several items match, prefer the Order line whose `Customer requisition` / `Customer reference` equals the request PO.
+3. Else request customer PO on Order lines, only if that PO maps to **one** Bossard item.
+4. Else request `bossard_item` / digits extracted from the PN.
+
+If several distinct Bossard items remain, remarks `Multiple Bossard items` and do not guess. Using another Order line only to read `Item number` is allowed; attaching that SO line is not.
 
 Attach SO/PO fields listed in **F&O fields**. Treat `0` and `#N/A` in UNIQUE dumps as empty, not codes.
 
@@ -61,11 +70,21 @@ Buyer remarks such as `Need immediate shipment` do **not** override a Remain/on-
 | Inventory | Available: `Reserved ordered`, `Reserved physical`. Not available: `On order`, `Long-term`, `Line partial` / `Line partially reserved`, `Inbound` / `Inbound processing` (+ partial), `Quality` / `Quality processing` (+ partial) |
 | Supplier ETA | `Not shipped` = full open qty. `Shipped partially` = remainder. `Shipped in full` = no open supply. Approval `In external review` = keep ETA and flag it |
 | Delivery zone | Read SO **Mode of delivery**, set transport days from **Mode of delivery — transport days** below |
-| Availability `O` | If reservation is `Reserved ordered` / `Reserved physical`: stock is on hand, `O` = packet as-of date (do **not** add 6 working days). Otherwise: confirmed receipt + **6 working days** (Mon–Fri unless the task gives a calendar) |
+| Availability `O` | If reservation is `Reserved ordered` / `Reserved physical`: stock is on hand, `O` = packet as-of date (do **not** add 6 working days). Otherwise: Purchase order line `Confirmed receipt date` + **6 working days** (Mon–Fri unless the task gives a calendar). Same +6 whether the PO line was found by Bossard item or by vendor PO number |
 
-Working-row flags to carry forward: inventory available Y/N, ETA date used, shipped status, mode of delivery, transport days, `O`.
+Working-row flags to carry forward: inventory available Y/N, resolved Bossard item, ETA date used, shipped status, mode of delivery, transport days, `O`.
 
 If several PO receipts could supply the line, do not pick silently — remarks `Multiple availability date` and send to review.
+
+### Supplier date
+
+Same formula for the new item path and the old vendor-PO# path. Do not fill the raw `Confirmed receipt date`.
+
+1. Take the request customer PN, then customer PO (the customer codes on the reschedule file).
+2. Resolve Bossard `Item number` from **Order lines** as above.
+3. Look up **Purchase order lines** by that Bossard item. Open supply first (`Not shipped` / remainder).
+4. If that misses, look up **Purchase order lines** by the request PO number (vendor PO# is usually not the customer PO).
+5. Vendor delivery date = `Confirmed receipt date` + **6 working days** + transport (929 = +3, 998 = +5, other known = 0). Then fill `I` as in **Calculate `I`**.
 
 ## 4. Calculate `I` (Pull-in / Expedite only)
 
@@ -80,10 +99,10 @@ Column `I` is the field being calculated (Bossard feedback delivery date). `G` /
 | `O` | Availability from step 3 |
 
 1. If `G` does not equal `M`: remarks `Unmatching committed date`. Still calculate `I`.
-2. Look up **Purchase order lines** by customer PO number, then by Bossard item (F&O vendor PO numbers are not the customer PO). Take supplier `Confirmed receipt date`.
+2. Get the supplier date from **Supplier date** (Bossard item on Order lines first, then Purchase order lines, then + **6 working days** + transport). Never use ship date `N`.
 3. **In stock** (`Reserved ordered` / `Reserved physical`): `I` = `H` − **3 working days**. Do not go before as-of.
-4. **Has supplier PO receipt**: `I` = confirmed receipt + **6 working days** + transport (929 = +3, 998 = +5). If that date is after `H`, `I` = `G` (cannot pull in).
-5. **Unmatched** (no SO/PO): still calculate `I` = `H` − 3 working days and flag review. Never invent a match. Never use ship date `N`.
+4. **Has supplier PO date** (not in stock): fill `I` with that vendor-delivery + 6 date. If it is after `H`, `I` = `G` (cannot pull in). Write `I` on the same Reply / `Rescheduling.xlsx` columns as before.
+5. **Unmatched** (no SO and no PO date): still calculate `I` = `H` − 3 working days and flag review. Never invent a match.
 
 Column `F` on the result file is always `Expedite` / `Rescheduling In` (the Pull-in label). Column `J` is remarks when a flag applies.
 
@@ -93,6 +112,7 @@ Reviewer accepts or overwrites `I` and `J`. **Mandatory** when remarks is any of
 
 - `Unmatched SO/PO line`
 - `Multiple availability date`
+- `Multiple Bossard items`
 - `Unmatching committed date`
 - approval = `In external review`
 
@@ -108,7 +128,7 @@ Format `.xlsx`. Existing Rescheduling header. Date format **DD-MMM-YY**. Push-ou
 | --- | --- | --- |
 | A | Order created date | SO created date or request date |
 | B | Customer PO# | Request |
-| C | Bossard item number | SO. `N/A` if unmapped |
+| C | Bossard item number | Matched SO `Item number`, else Order-lines mapping from the request PN/PO. `N/A` if unmapped |
 | D | External PN# | Request |
 | E | Order quantity | Line quantity |
 | F | Message | Expedite / Rescheduling In only |
@@ -140,7 +160,7 @@ Do not insert new request rows. Do not change Action, dates, qty, or price.
 ## 7. Working days and dates
 
 - Working days = Mon–Fri. Do not invent public holidays unless the task attaches a calendar.
-- `O` = confirmed receipt + 6 working days when inbound; in-stock uses packet as-of (skip Sat/Sun).
+- `O` = Purchase order line `Confirmed receipt date` + 6 working days when inbound (item path or vendor-PO# path); in-stock uses packet as-of (skip Sat/Sun). Do not write the raw vendor date.
 - Result file dates: `DD-MMM-YY` (example `18-Sep-26`).
 - Customer Reply dates: keep that workbook's existing cell date format. Do not stringify to text unless the gold column is already text (`shipped on 10 Sep`, `TBA`, split-qty notes).
 
@@ -163,9 +183,10 @@ Source extracts in gold packets: `Order lines_20260805.xlsx`, `Purchase order li
 | --- | --- |
 | Customer account / Customer name | Identity |
 | Sales order / Internal line | SO key |
-| Customer requisition | Customer PO# |
-| External | External PN |
-| Item number | Bossard item number |
+| Customer requisition | Customer PO# on the SO. Also used to resolve Bossard item when the request PN is absent or maps to several items |
+| Customer reference | Alternate customer PO# on the SO |
+| External | Customer PN on the SO. First key from the reschedule file to Bossard `Item number` |
+| Item number | Bossard item. Look up Purchase order lines by this **before** vendor PO# |
 | Quantity / Deliver remainder | Qty |
 | Line status | Must be Open order in current extracts |
 | Order complete | Yes / No |
@@ -181,14 +202,14 @@ Source extracts in gold packets: `Order lines_20260805.xlsx`, `Purchase order li
 
 | Field | Used for |
 | --- | --- |
-| Purchase order / Line number | PO key |
+| Purchase order / Line number | Vendor PO key. Fallback only: match the **request** PO number here if the Bossard-item lookup missed (vendor PO# is usually not the customer PO) |
 | Vendor account / Name | Supplier |
-| Item number | Bossard item |
+| Item number | Bossard item — primary lookup key from Order lines |
 | Quantity / Deliver remainder | Open supply |
 | Shipped | Not shipped / Shipped partially / Shipped in full |
 | Warehouse | PEN |
 | Confirmed shipping date | Supplier ship ETA |
-| Confirmed receipt date | Supplier receipt ETA; `O` = this date + 6 working days when supply is inbound |
+| Confirmed receipt date | Supplier delivery date. `O` / `I` use **this date + 6 working days** (+ transport). Same formula for the Bossard-item path and the vendor-PO# path |
 | Approval status | Approved / Confirmed / In external review |
 | Line status | Open order |
 
@@ -239,7 +260,7 @@ Unknown code → 0 days and remarks that the code is unconfirmed. Do not invent 
 
 ## Working-row fields after join
 
-Carry at least: request identity, type, `G`, `H`, `M`, `N`, `O`, reservation, shipped, approval, mode, transport days, match status, remarks flags.
+Carry at least: request identity, type, resolved Bossard item, `G`, `H`, `M`, `N`, `O`, reservation, shipped, approval, mode, transport days, match status, remarks flags.
 
 ---
 
@@ -249,7 +270,7 @@ Detect the layout from **header names**, not from the filename and not from Exce
 
 Copy `Original` through unchanged. Put answers on `Reply`. Reply column names differ by customer; map them onto spec ETA / REMARKS / TRACKING.
 
-Join always: customer PO + external PN + quantity (+ need/due date, then Bossard item).
+SO join always: customer PO + external PN + quantity (+ need/due date, then Bossard item). Supplier date is a separate lookup: request PN/PO → Order lines Bossard item → Purchase order lines `Confirmed receipt date` + 6 working days.
 
 ## Abinaya / BOSSARD (M) SDN BHD
 
@@ -437,3 +458,5 @@ Datalogic split supply:
 ## Join reminder from spec
 
 Do not collapse Abinaya / Nurnajwa / Datalogic lines that repeat the same PN on one PO with different qty or dates. One request line → one Reply row → at most one result row if type is Pull-in.
+
+Do not attach another PO's sales-order line to fill the join. You **may** read that line's `Item number` so Purchase order lines can supply `Confirmed receipt date` + 6 working days.
